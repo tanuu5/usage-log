@@ -1,0 +1,14 @@
+{
+  "name": "usage-log",
+  "description": "Claude Code の利用枠（5時間枠・7日枠）の使用率を、ターンが終わるたびにファイルへ記録する mod",
+  "owner": {
+    "name": "たぬ"
+  },
+  "plugins": [
+    {
+      "name": "usage-log",
+      "source": "./plugins/usage-log",
+      "description": "ターンが終わるたびに、時刻・5時間枠と7日枠の使用率・トークン数などを JSON Lines で1行ずつ記録する"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "usage-log",
+  "version": "0.3.1",
+  "description": "ターンが終わるたびに使用率などを記録し、7日枠の目安（ペース表）との差を入力欄の下に出す",
+  "author": {
+    "name": "たぬ"
+  },
+  "userConfig": {
+    "log_file": {
+      "type": "string",
+      "title": "記録ファイルの場所",
+      "description": "1ターン1行の JSON Lines で追記する。~ はホームフォルダ。複数のセッションが同じファイルに書き足す",
+      "default": "~/.claude/usage-log/turns.jsonl"
+    },
+    "pace_table": {
+      "type": "string",
+      "title": "7日枠の目安（各曜日 0:00 の累計 %）",
+      "description": "例：火=12, 水=25, 木=37, 金=49, 土=61, 日=80, 月=98。リセットの時刻は自動で読み取り、その時点で 100%",
+      "default": "火=12, 水=25, 木=37, 金=49, 土=61, 日=80, 月=98"
+    }
+  }
+}
