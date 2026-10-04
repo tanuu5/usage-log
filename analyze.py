@@ -7,6 +7,10 @@
 
 増分は、全セッションの記録を時刻順に並べ、直前の記録からどれだけ増えたかで数える
 （同時に動くセッションを二重に数えないため）。claude.ai など、記録の外での消費も次の記録に乗る。
+
+リセットのチケットなどで、枠の途中で使用率が 0 近くに戻ることがある。同じ枠の中で大きく下がった
+（または次の枠が前倒しで始まった）ときは途中のリセットとみなし、増分は 0 から数え直し、
+7日枠の「各曜日 0:00 の累計」の平均からは、その枠のリセット以降の時点を外す。
 """
 import json
 import os
@@ -17,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 DAY = timedelta(days=1)
 WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"]
 DEFAULT_PACE = "火=12, 水=25, 木=37, 金=49, 土=61, 日=80, 月=98"
+# 同じ枠の中でこれ以上下がったら、途中のリセット（チケットなど）とみなす（% ポイント）
+RESET_DROP = 5
 
 
 def load(path):
@@ -57,6 +63,8 @@ def add_increments(rows):
                 inc = None if base is None else lim["pct"] - base
             elif prev[0] == key:
                 inc = lim["pct"] - prev[1]
+                if inc <= -RESET_DROP:
+                    inc = lim["pct"]  # 途中のリセット：0 から数える
             else:
                 inc = lim["pct"]  # 枠が切り替わった：0 から数える
             r["_inc"][kind] = None if inc is None else max(0.0, inc)
@@ -146,21 +154,46 @@ def weekly(rows, now, pace):
         out.append((end, f"{WEEKDAYS[dow(end)]} {end:%H:%M}（リセット）", None))
         return out
 
+    def when(t):
+        lt = t.astimezone(tz)
+        return f"{lt:%m/%d} {WEEKDAYS[dow(lt)]} {lt:%H:%M}"
+
+    # 途中のリセット（チケットなど）：枠 → この時刻より後の時点は平均に入れない
+    cut = {}
+    notes = []
+    for reset, items in windows.items():
+        items.sort()
+        for (t0, p0), (t1, p1) in zip(items, items[1:]):
+            if p0 - p1 >= RESET_DROP:
+                cut[reset] = t0  # t0〜t1 のどこかで戻った。t0 までは確か
+                notes.append(f"{when(t0)}〜{when(t1)} の間に {fmt(p0)}% → {fmt(p1)}%（〜{when(reset)} の枠）")
+                break
+    resets = sorted(windows)
+    for a, b in zip(resets, resets[1:]):
+        start_b = b - 7 * DAY
+        if start_b < a - timedelta(hours=1):  # 次の枠が前倒しで始まった
+            cut[a] = min(cut.get(a, start_b), start_b)
+            notes.append(f"{when(start_b)} に枠が前倒しで切り替わった（〜{when(a)} の枠）")
+
     values = defaultdict(list)
     order = []
     current = {}
     for reset, items in sorted(windows.items()):
-        items.sort()
         first = items[0][0]
+        is_current = reset == resets[-1] and reset > now
         for t, label, _ in checkpoints(reset):
             if label not in order:
                 order.append(label)
             if t > now or t < first:
                 continue  # まだ来ていない、または記録を始める前（値が分からない）
-            v = max(p for ts, p in items if ts <= t)
-            values[label].append(v)
-            if reset > now:
+            if reset in cut and t > cut[reset] and not is_current:
+                continue  # 途中でリセットされた後（終わった枠では値も分からない）
+            v = [p for ts, p in items if ts <= t][-1]  # その時点で最後に記録された値
+            if is_current:
                 current[label] = v
+            if reset in cut and t > cut[reset]:
+                continue  # 今の枠でも、リセット後の値は平均に混ぜない
+            values[label].append(v)
 
     targets = {}
     if pace:
@@ -181,6 +214,10 @@ def weekly(rows, now, pace):
         diff = "-" if avg is None or target is None else f"{avg - target:+.1f}"
         body.append([label, fmt(avg), len(values[label]), fmt(current.get(label)), fmt(target, 0), diff])
     lines.append(table(["時点", "平均 %", "枠の数", "今の枠 %", "目安 %", "平均−目安"], body))
+    if notes:
+        lines.append("")
+        lines.append("途中のリセット（チケットなど）があった枠は、その後の時点を平均に入れていない:")
+        lines.extend(f"  - {n}" for n in sorted(notes))
     return "\n".join(lines)
 
 
